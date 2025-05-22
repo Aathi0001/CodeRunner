@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>CodeRunner</title>
+
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/material-darker.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code&display=swap" rel="stylesheet">
+
+
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/clike/clike.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/python/python.min.js"></script>
+
+    <style>
+   
+    button {
+  background-color: #3b82f6; /* Tailwind blue-500 */
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background-color 0.3s ease;
+}
+
+button:hover {
+  background-color: #2563eb; /* darker blue */
+}
+        body {
+    font-family: 'Fira Code', monospace;
+  }
+        #editor .CodeMirror {
+            height: 400px;
+            font-size: 16px;
+            border: 1px solid #4B5563;
+            border-radius: 0.5rem;
+        }
+
+       #inputOverlay {
+    font-size: 14px;
+    line-height: 1.4;
+    background-color: rgba(0,0,0,0.3);
+    padding: 8px;
+    border-radius: 0.5rem;
+}
+@media (max-width: 600px) {
+  #editor .CodeMirror, #inputContainer, #input {
+    height: 300px !important;
+    width: 100% !important;
+  }
+  button {
+    width: 100%;
+  }
+}
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex items-center justify-center px-4">
+  <div class="max-w-4xl w-full bg-gray-800 p-6 rounded-xl shadow-lg">
+    <!-- All your content goes here -->
+ 
+    <h1 class="text-4xl font-bold mb-6 text-center text-blue-400">CodeRunner</h1>
+<form method="post" th:action="@{/run}" class="space-y-6">
+        
+            <label for="language" class="block mb-2 font-semibold">Language:</label>
+            <select id="language" name="language" class="w-full p-2 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="java">Java</option>
+            <option value="python3">Python</option>
+            <option value="c">C</option>
+            <option value="cpp">C++</option>
+        </select>
+        <br><br>
+
+        <label for="code">Enter your code:</label><br>
+        <textarea name="code" id="code" hidden></textarea>
+        <div id="editor"></div>
+        <br><br>
+        
+        <label for="input" id="inputLabel" style="display:none;">Custom Input (required for this code):</label><br>
+        <div id="inputContainer" style="position: relative; display: none; width: 100%;">
+    <textarea name="input" id="input" rows="5" cols="80" class="w-full p-2 mt-2 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        style="width: 100%; padding: 10px; position: relative; z-index: 2; background: transparent; resize: vertical;"></textarea>
+    <div id="inputOverlay"
+        style="width: 100%; position: absolute; top: 12px; left: 14px; z-index: 1; color: #999; font-family: monospace; white-space: pre-wrap; pointer-events: none; opacity: 0.6;">
+    </div>
+</div>
+
+        <br><br>
+
+<button type="submit" >
+  ▶ Run Code
+</button>
+
+      
+    </form>
+ </div>
+    <script>
+    const textarea = document.getElementById("code");
+    const inputField = document.getElementById("input");
+    const inputLabel = document.getElementById("inputLabel");
+    const languageSelector = document.getElementById("language");
+
+    const editor = CodeMirror(document.getElementById("editor"), {
+        value: "",
+        mode: "text/x-java",
+        theme: "material-darker",
+        lineNumbers: true
+    });
+
+    function detectNeedsInput(code, lang) {
+        return (
+            (lang === "java" && code.includes("Scanner")) ||
+            (lang === "python3" && code.includes("input(")) ||
+            (lang === "c" && code.includes("scanf")) ||
+            (lang === "cpp" && code.includes("cin"))
+        );
+    }
+
+    function extractPrompts(code, lang) {
+        const prompts = [];
+
+        if (lang === "java") {
+            const lines = code.split("\n");
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (/\.next(Int|Float|Double|Boolean|Byte|Short|Long|Char)?\s*\(\)/.test(line)) {
+                    // Handle input-taking methods
+                    for (let j = i - 1; j >= 0; j--) {
+                        const prev = lines[j].trim();
+                        const match = prev.match(/System\.out\.print(?:ln)?\s*\(\s*"([^"]+)"\s*\)\s*;/);
+                        if (match) {
+                            prompts.push(match[1]);
+                            break;
+                        }
+                    }
+                } else if (/\.nextLine\s*\(\)/.test(line)) {
+                    // Only add nextLine() if it has a separate prompt
+                    const prev = lines[i - 1]?.trim();
+                    const promptMatch = prev && prev.match(/System\.out\.print(?:ln)?\s*\(\s*"([^"]+)"\s*\)\s*;/);
+                    if (promptMatch) {
+                        prompts.push(promptMatch[1]);
+                    }
+                }
+
+            }
+        } else if (lang === "python3") {
+            const lines = code.split("\n");
+            for (const line of lines) {
+                const match = line.match(/input\s*\(\s*['"]([^'"]+)['"]\s*\)/);
+                if (match) prompts.push(match[1]);
+            }
+        } else if (lang === "c") {
+            const lines = code.split("\n");
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes("scanf")) {
+                    for (let j = i - 1; j >= 0; j--) {
+                        const match = lines[j].match(/printf\s*\(\s*"([^"]+)"\s*\)/);
+                        if (match) {
+                            prompts.push(match[1].replace(/\\n/g, ""));
+                            break;
+                        }
+                    }
+                }
+            }
+        } else if (lang === "cpp") {
+            const lines = code.split("\n");
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes("cin")) {
+                    for (let j = i - 1; j >= 0; j--) {
+                        const match = lines[j].match(/cout\s*<<\s*"([^"]+)"/);
+                        if (match) {
+                            prompts.push(match[1]);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        return prompts;
+    }
+
+    function checkForInput() {
+    const code = editor.getValue();
+    const lang = languageSelector.value;
+    const needsInput = detectNeedsInput(code, lang);
+
+    const inputContainer = document.getElementById("inputContainer");
+    const inputOverlay = document.getElementById("inputOverlay");
+
+    if (needsInput) {
+        inputField.style.display = "block";
+        inputLabel.style.display = "block";
+        inputContainer.style.display = "block";
+
+        const prompts = extractPrompts(code, lang);
+        const hint = prompts.length > 0
+            ?  prompts.map((p, i) => `${i + 1}. ${p}`).join("\n") + "\n\n" + `Please enter ${prompts.length} value(s), each on a new line:\n\n`
+            : "Please enter required inputs, one per line.";
+        
+        inputOverlay.textContent = hint;
+
+    } else {
+        inputField.style.display = "none";
+        inputLabel.style.display = "none";
+        inputContainer.style.display = "none";
+        inputOverlay.textContent = "";
+        inputField.value = "";
+    }
+}
+
+
+    languageSelector.addEventListener("change", () => {
+        const lang = languageSelector.value;
+        let mode = "text/x-java";
+        if (lang === "python3") mode = "python";
+        else if (lang === "c") mode = "text/x-csrc";
+        else if (lang === "cpp") mode = "text/x-c++src";
+        editor.setOption("mode", mode);
+        checkForInput();
+    });
+
+    editor.on("change", checkForInput);
+
+   
+    document.querySelector("form").addEventListener("submit", function (e) {
+    textarea.value = editor.getValue();
+    const code = textarea.value;
+    const lang = languageSelector.value;
+
+    const needsInput = detectNeedsInput(code, lang);
+
+    if (needsInput) {
+        const prompts = extractPrompts(code, lang);
+        const expectedCount = prompts.length;
+
+        const userInputs = inputField.value.split("\n").filter(line => line.trim() !== "");
+        const filledCount = userInputs.length;
+
+        if (filledCount < expectedCount) {
+            e.preventDefault();
+            alert(`⚠️ Your code requires ${expectedCount} input value(s).\nYou have only provided ${filledCount}.\n\nPlease fill in all required inputs.`);
+            inputField.focus();
+        }
+    }
+});
+
+
+</script>
+
+</body>
+
+
+</html>
